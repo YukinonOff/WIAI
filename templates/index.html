@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Main Page{% endblock %}
+{% block content %}
+<div class="accordion" id="accordionSections">
+    {% for section in data.sections %}
+    <div class="card">
+        <div class="card-header" id="heading{{ loop.index }}">
+            <h2 class="mb-0">
+                <button class="btn btn-link" type="button" data-toggle="collapse" data-target="#collapse{{ loop.index }}" aria-expanded="true" aria-controls="collapse{{ loop.index }}">
+                    {{ section.name }}
+                </button>
+            </h2>
+        </div>
+        <div id="collapse{{ loop.index }}" class="collapse" aria-labelledby="heading{{ loop.index }}" data-parent="#accordionSections">
+            <div class="card-body">
+                {% for subsection in section.subsections %}
+                <h4>{{ subsection.name }}</h4>
+                <ul class="list-group">
+                    {% for file in subsection.files %}
+                    <li class="list-group-item"><a href="{{ file }}">{{ file }}</a></li>
+                    {% endfor %}
+                </ul>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
