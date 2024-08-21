@@ -1,37 +1,44 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify, session, flash
+from flask import Flask, request, redirect, url_for, render_template, session
 import json
 import os
-from functools import wraps
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'  # Измени на более надежный ключ в продакшене
+app.secret_key = 'your_secret_key'
 
-# Загрузка данных из JSON
+# Загрузка данных из JSON-файлов
 def load_data(filename):
     if os.path.exists(filename):
-        with open(filename, 'r') as file:
-            return json.load(file)
+        try:
+            with open(filename, 'r') as file:
+                return json.load(file)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from {filename}: {e}")
+            return {}
     return {}
 
-# Сохранение данных в JSON
+# Сохранение данных в JSON-файлы
 def save_data(filename, data):
-    with open(filename, 'w') as file:
-        json.dump(data, file, indent=4)
+    try:
+        with open(filename, 'w') as file:
+            json.dump(data, file, indent=4)
+    except IOError as e:
+        print(f"Error writing to {filename}: {e}")
 
-# Авторизация
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'logged_in' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated_function
+# Инициализация файлов данных при первом запуске
+if not os.path.exists('data.json'):
+    save_data('data.json', {'sections': []})
+if not os.path.exists('users.json'):
+    save_data('users.json', {'admin': 'admin'})
+
+data = load_data('data.json')
+users = load_data('users.json')
 
 # Главная страница
 @app.route('/')
 def index():
-    data = load_data('data.json')
-    return render_template('index.html', data=data)
+    if 'logged_in' in session:
+        return render_template('index.html', data=data)
+    return redirect(url_for('login'))
 
 # Страница входа
 @app.route('/login', methods=['GET', 'POST'])
@@ -39,100 +46,89 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        users = load_data('users.json')
-        if username in users and users[username] == password:
+        if users.get(username) == password:
             session['logged_in'] = True
-            flash('You were successfully logged in', 'success')
-            return redirect(url_for('admin'))
-        else:
-            flash('Invalid credentials', 'danger')
+            return redirect(url_for('index'))
+        return 'Invalid credentials'
     return render_template('login.html')
 
-# Выход
+# Выход из системы
 @app.route('/logout')
-@login_required
 def logout():
     session.pop('logged_in', None)
-    flash('You were successfully logged out', 'success')
-    return redirect(url_for('index'))
+    return redirect(url_for('login'))
 
-# Админ-панель
-@app.route('/admin')
-@login_required
-def admin():
-    data = load_data('data.json')
-    return render_template('admin.html', data=data)
-
-# Добавление раздела
+# Добавление нового раздела
 @app.route('/add_section', methods=['POST'])
-@login_required
 def add_section():
-    data = load_data('data.json')
-    section_name = request.form['section_name']
-    data['sections'].append({"name": section_name, "subsections": []})
-    save_data('data.json', data)
-    flash('Section added successfully', 'success')
-    return redirect(url_for('admin'))
-
-# Добавление подраздела
-@app.route('/add_subsection', methods=['POST'])
-@login_required
-def add_subsection():
-    data = load_data('data.json')
-    section_id = int(request.form['section_id'])
-    subsection_name = request.form['subsection_name']
-    data['sections'][section_id]['subsections'].append({"name": subsection_name, "files": []})
-    save_data('data.json', data)
-    flash('Subsection added successfully', 'success')
-    return redirect(url_for('admin'))
-
-# Добавление файла
-@app.route('/add_file', methods=['POST'])
-@login_required
-def add_file():
-    data = load_data('data.json')
-    section_id = int(request.form['section_id'])
-    subsection_id = int(request.form['subsection_id'])
-    file_name = request.form['file_name']
-    data['sections'][section_id]['subsections'][subsection_id]['files'].append(file_name)
-    save_data('data.json', data)
-    flash('File added successfully', 'success')
-    return redirect(url_for('admin'))
+    if 'logged_in' in session:
+        section_name = request.form['section_name']
+        if section_name:
+            data['sections'].append({'name': section_name, 'subsections': []})
+            save_data('data.json', data)
+        return redirect(url_for('index'))
+    return redirect(url_for('login'))
 
 # Удаление раздела
 @app.route('/delete_section/<int:section_id>', methods=['POST'])
-@login_required
 def delete_section(section_id):
-    data = load_data('data.json')
-    data['sections'].pop(section_id)
-    save_data('data.json', data)
-    flash('Section deleted successfully', 'success')
-    return redirect(url_for('admin'))
+    if 'logged_in' in session:
+        if 0 <= section_id < len(data['sections']):
+            del data['sections'][section_id]
+            save_data('data.json', data)
+        return redirect(url_for('index'))
+    return redirect(url_for('login'))
+
+# Добавление подраздела
+@app.route('/add_subsection', methods=['POST'])
+def add_subsection():
+    if 'logged_in' in session:
+        section_id = int(request.form['section_id'])
+        subsection_name = request.form['subsection_name']
+        if 0 <= section_id < len(data['sections']) and subsection_name:
+            data['sections'][section_id]['subsections'].append({'name': subsection_name, 'files': []})
+            save_data('data.json', data)
+        return redirect(url_for('index'))
+    return redirect(url_for('login'))
 
 # Удаление подраздела
 @app.route('/delete_subsection/<int:section_id>/<int:subsection_id>', methods=['POST'])
-@login_required
 def delete_subsection(section_id, subsection_id):
-    data = load_data('data.json')
-    data['sections'][section_id]['subsections'].pop(subsection_id)
-    save_data('data.json', data)
-    flash('Subsection deleted successfully', 'success')
-    return redirect(url_for('admin'))
+    if 'logged_in' in session:
+        if (0 <= section_id < len(data['sections']) and
+            0 <= subsection_id < len(data['sections'][section_id]['subsections'])):
+            del data['sections'][section_id]['subsections'][subsection_id]
+            save_data('data.json', data)
+        return redirect(url_for('index'))
+    return redirect(url_for('login'))
+
+# Добавление файла
+@app.route('/add_file', methods=['POST'])
+def add_file():
+    if 'logged_in' in session:
+        section_id = int(request.form['section_id'])
+        subsection_id = int(request.form['subsection_id'])
+        file_name = request.form['file_name']
+        if (0 <= section_id < len(data['sections']) and
+            0 <= subsection_id < len(data['sections'][section_id]['subsections']) and
+            file_name):
+            data['sections'][section_id]['subsections'][subsection_id]['files'].append(file_name)
+            save_data('data.json', data)
+        return redirect(url_for('index'))
+    return redirect(url_for('login'))
 
 # Удаление файла
 @app.route('/delete_file/<int:section_id>/<int:subsection_id>/<int:file_id>', methods=['POST'])
-@login_required
 def delete_file(section_id, subsection_id, file_id):
-    data = load_data('data.json')
-    data['sections'][section_id]['subsections'][subsection_id]['files'].pop(file_id)
-    save_data('data.json', data)
-    flash('File deleted successfully', 'success')
-    return redirect(url_for('admin'))
+    if 'logged_in' in session:
+        if (0 <= section_id < len(data['sections']) and
+            0 <= subsection_id < len(data['sections'][section_id]['subsections']) and
+            0 <= file_id < len(data['sections'][section_id]['subsections'][subsection_id]['files'])):
+            del data['sections'][section_id]['subsections'][subsection_id]['files'][file_id]
+            save_data('data.json', data)
+        return redirect(url_for('index'))
+    return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    if not os.path.exists('users.json'):
-        save_data('users.json', {'admin': 'admin'})  # Создает начального пользователя
-    if not os.path.exists('data.json'):
-        save_data('data.json', {'sections': []})
     app.run(debug=True)
     
